@@ -7,12 +7,13 @@
 # - Session, declarative_base, sessionmaker : ORM 세션 및 베이스 클래스 관리
 from collections.abc import Generator
 
-# 애플리케이션 설정 객체 import
-# - settings : DB 접속 문자열 등 설정값 조회
-from app.core.config import settings
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
+# 애플리케이션 설정 객체 import
+# - settings : DB 접속 문자열 등 설정값 조회
+from app.core.config import settings
 
 # SQLAlchemy 엔진 및 세션 팩토리 초기화
 # - pool_pre_ping=True로 끊어진 커넥션 사전 감지
