@@ -128,22 +128,42 @@ def chat_with_tools(messages: list[dict[str, Any]], tools: list[dict[str, Any]])
     # OpenAI 클라이언트 생성
     client = _create_client()
     try:
-        # 도구 호출을 포함한 Chat Completions 실행
+        # 추론 모델 호환을 위해 reasoning_effort="none" 지정 후 호출
         response = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=tools, tool_choice="auto"
+            model=settings.llm_model,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            reasoning_effort="none",
         )
-        # 첫 번째 선택지의 메시지 객체 반환
         return response.choices[0].message
-    except Exception as exc:
+    except Exception as first_exc:
+        # 일부 모델/엔드포인트에서 reasoning_effort 파라미터를 거부하는 경우 제외하고 재시도
+        if "reasoning_effort" in str(first_exc).lower():
+            try:
+                response = client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                )
+                return response.choices[0].message
+            except Exception as retry_exc:
+                raise LLMClientError(
+                    f"LLM Tool Calling 실행에 실패했습니다: {retry_exc}",
+                    code="LLM_UNAVAILABLE",
+                    status=503,
+                ) from retry_exc
+
         # 호출 실패 시 도메인/서비스 계층에서 처리할 수 있는 LLMClientError로 래핑
         raise LLMClientError(
-            f"LLM Tool Calling 실행에 실패했습니다: {exc}",
+            f"LLM Tool Calling 실행에 실패했습니다: {first_exc}",
             code="LLM_UNAVAILABLE",
             status=503,
-        ) from exc
+        ) from first_exc
 
 
 """
 OpenAI 호환 Chat Completions 기반의 보고서 요약(brief/structured) 및 Tool Calling 호출 클라이언트를 구현하였다.
-settings.openai_api_key를 OpenAI 클라이언트에 명시적으로 전달하고 키 누락 시 명확한 예외를 반환하도록 구성하였다.
+Tool Calling 호출 시 reasoning_effort="none"을 지정하고 미지원 모델 fallback을 추가해 추론 모델 호환성을 확보하였다.
 """
