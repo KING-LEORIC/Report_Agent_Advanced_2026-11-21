@@ -10,7 +10,7 @@ from typing import Any
 from openai import OpenAI
 
 # 애플리케이션 설정 객체 import
-# - settings : LLM 모델명, 타임아웃, 재시도 횟수 조회
+# - settings : API 키, LLM 모델명, 타임아웃, 재시도 횟수 조회
 from app.core.config import settings
 
 
@@ -30,11 +30,17 @@ class LLMClientError(RuntimeError):
 
 
 # OpenAI 클라이언트 인스턴스 생성 헬퍼 함수
-# - 설정된 llm_timeout_seconds 적용
+# - 설정된 api_key 및 llm_timeout_seconds 적용
 def _create_client() -> OpenAI:
-    """타임아웃 설정이 반영된 OpenAI 클라이언트를 생성하는 헬퍼 함수"""
-    # 환경변수(OPENAI_API_KEY 등) 및 타임아웃으로 클라이언트 초기화
-    return OpenAI(timeout=settings.llm_timeout_seconds)
+    """API 키와 타임아웃 설정이 반영된 OpenAI 클라이언트를 생성하는 헬퍼 함수"""
+    api_key = settings.openai_api_key or None
+    if not api_key:
+        raise LLMClientError(
+            "OPENAI_API_KEY가 설정되어 있지 않습니다. .env 또는 환경변수를 확인하세요.",
+            code="MISSING_API_KEY",
+            status=500,
+        )
+    return OpenAI(api_key=api_key, timeout=settings.llm_timeout_seconds)
 
 
 # 보고서 요약 생성 함수 (brief / structured 스타일 지원)
@@ -139,5 +145,5 @@ def chat_with_tools(messages: list[dict[str, Any]], tools: list[dict[str, Any]])
 
 """
 OpenAI 호환 Chat Completions 기반의 보고서 요약(brief/structured) 및 Tool Calling 호출 클라이언트를 구현하였다.
-재시도 횟수·타임아웃 설정 반영, 구조화 요약 JSON 필드 검증 및 예외 래핑을 통해 상위 서비스 계층과 분리하였다.
+settings.openai_api_key를 OpenAI 클라이언트에 명시적으로 전달하고 키 누락 시 명확한 예외를 반환하도록 구성하였다.
 """
