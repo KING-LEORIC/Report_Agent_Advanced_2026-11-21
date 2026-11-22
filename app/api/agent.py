@@ -1,4 +1,4 @@
-"""유사도 검색, 에이전트 질의, 에이전트 실행 및 보고서 조회 FastAPI 라우터를 정의하는 API 모듈"""
+"""유사도 검색, 에이전트 질의, 에이전트 실행, 실행 이력 및 보고서 조회 FastAPI 라우터를 정의하는 API 모듈"""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from collections.abc import Generator
 
 # FastAPI 라우터·의존성·예외 처리 및 Pydantic 스키마 정의 모듈 import
 # - APIRouter : 엔드포인트 그룹 라우터 생성
-# - Depends, HTTPException, status : DB 세션 주입 및 HTTP 상태 코드 예외 처리
-# - BaseModel, Field : 요청 바디 유효성 검사 스키마 정의
+# - Depends, HTTPException, Query, status : DB 세션 주입, 쿼리 파라미터 및 HTTP 상태 코드 예외 처리
+# - BaseModel, Field, field_validator : 요청 바디 유효성 검사 스키마 및 필드 검증기 정의
 # - Session : SQLAlchemy 세션 타입
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.services.agent_service import AgentService
@@ -52,6 +52,15 @@ class SimilarSearchRequest(BaseModel):
     keyword_limit: int = Field(default=20, ge=1, le=100)
     semantic_limit: int = Field(default=20, ge=1, le=100)
 
+    # 공백만 포함된 검색어 입력 시 422 유효성 검증 오류 유발
+    @field_validator("query")
+    @classmethod
+    def validate_query_not_blank(cls, value: str) -> str:
+        """검색어가 공백만으로 구성되지 않았는지 검증하는 필드 검증기"""
+        if not value.strip():
+            raise ValueError("검색어(query)는 공백만 입력할 수 없습니다.")
+        return value
+
 
 # 에이전트 질의 요청 스키마 클래스
 # - 질의 문자열, 카테고리 필터 및 상위 반환 문서 개수(top_k) 정의
@@ -61,6 +70,15 @@ class AgentQueryRequest(BaseModel):
     query: str = Field(..., min_length=1)
     category_code: str | None = None
     top_k: int = Field(default=5, ge=1, le=50)
+
+    # 공백만 포함된 질의 문자열 입력 시 422 유효성 검증 오류 유발
+    @field_validator("query")
+    @classmethod
+    def validate_query_not_blank(cls, value: str) -> str:
+        """질의 문자열(query)이 공백만으로 구성되지 않았는지 검증하는 필드 검증기"""
+        if not value.strip():
+            raise ValueError("질의(query)는 공백만 입력할 수 없습니다.")
+        return value
 
 
 # 에이전트 통합 실행 요청 스키마 클래스
@@ -172,6 +190,21 @@ def run_agent(
     )
 
 
+# 에이전트 실행 이력 조회 엔드포인트
+# - GET /api/v1/agent/runs 요청 처리 (limit, offset, status 쿼리 지원)
+@router.get("/agent/runs")
+def list_agent_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """에이전트 실행 이력 목록을 페이지네이션 및 상태 필터와 함께 반환하는 엔드포인트"""
+    # 서비스 인스턴스 생성 후 실행 이력 조회
+    service = AgentService(db=db)
+    return service.list_agent_runs(limit=limit, offset=offset, run_status=status_filter)
+
+
 # 단일 보고서 조회 엔드포인트
 # - GET /api/v1/agent/reports/{report_id} 요청 처리 및 미존재 시 404 반환
 @router.get("/agent/reports/{report_id}")
@@ -191,6 +224,6 @@ def get_agent_report(
 
 
 """
-/api/v1/search/similar, /api/v1/agent/query, /api/v1/agent/run 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
-/agent/run에서 find_report 액션을 지원하도록 분기를 추가해 보고서 검색 요청을 처리할 수 있게 구성하였다.
+/api/v1/search/similar, /api/v1/agent/query, /api/v1/agent/run, /api/v1/agent/runs 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
+공백만 입력된 query에 대한 유효성 검증기를 추가해 필수 검색어 누락 시 422 응답이 반환되도록 구성하였다.
 """
