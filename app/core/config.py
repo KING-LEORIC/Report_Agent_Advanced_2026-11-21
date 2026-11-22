@@ -81,6 +81,11 @@ class Settings:
         project_root = Path(__file__).resolve().parents[2]
         dotenv_map = _load_dotenv_file(project_root / ".env")
 
+        # .env에 존재하는 값 중 OS 환경변수에 비어 있는 항목은 기본값으로 주입
+        for k, v in dotenv_map.items():
+            if v != "" and not os.environ.get(k):
+                os.environ[k] = v
+
         # 서비스 기본 메타데이터 설정
         self.app_name: str = _get_env_value(
             "APP_NAME", dotenv_map, "Report Agent | 2026-11-20"
@@ -111,7 +116,10 @@ class Settings:
             _get_env_value("SEARCH_MIN_SIMILARITY", dotenv_map, "0.75")
         )
 
-        # LLM 호출, 재시도 및 Tool Calling 제한 설정
+        # LLM API 키, 호출 모델, 타임아웃, 재시도 및 Tool Calling 제한 설정
+        self.openai_api_key: str = _get_env_value(
+            "OPENAI_API_KEY", dotenv_map, ""
+        ).strip()
         self.llm_model: str = _get_env_value(
             "LLM_MODEL", dotenv_map, "configured-llm-model"
         )
@@ -121,9 +129,12 @@ class Settings:
         self.llm_max_retries: int = int(
             _get_env_value("LLM_MAX_RETRIES", dotenv_map, "2")
         )
-        self.llm_max_tool_calls: int = int(
-            _get_env_value("LLM_MAX_TOOL_calls", dotenv_map, "3")
+        raw_max_tool_calls = _get_env_value(
+            "LLM_MAX_TOOL_CALLS",
+            dotenv_map,
+            _get_env_value("LLM_MAX_TOOL_calls", dotenv_map, "3"),
         )
+        self.llm_max_tool_calls: int = int(raw_max_tool_calls)
 
     # SQLAlchemy 접속 URL 생성 프로퍼티
     # - 명시적 database_url이 있으면 반환하고 없으면 개별 항목으로 조합
@@ -169,5 +180,5 @@ settings = get_settings()
 
 """
 외부 패키지(pydantic-settings) 없이 Python 표준 라이브러리만으로 .env 및 환경변수를 읽는 Settings 클래스를 구현하였다.
-DB 접속 URL 조합, E5 임베딩/검색 설정, LLM 호출 옵션 및 난이도 레벨 판별(at_least) 기능을 기존과 동일하게 유지하였다.
+OPENAI_API_KEY 로드 및 os.environ 반영을 추가해 외부 SDK가 .env 설정값을 일관되게 참조하도록 구성하였다.
 """
