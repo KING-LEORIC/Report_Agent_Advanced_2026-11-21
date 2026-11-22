@@ -1,4 +1,4 @@
-"""유사도 검색, 에이전트 질의 및 보고서 조회 FastAPI 라우터를 정의하는 API 모듈"""
+"""유사도 검색, 에이전트 질의, 에이전트 실행 및 보고서 조회 FastAPI 라우터를 정의하는 API 모듈"""
 
 from __future__ import annotations
 
@@ -63,6 +63,20 @@ class AgentQueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=50)
 
 
+# 에이전트 통합 실행 요청 스키마 클래스
+# - action 및 액션별 선택 파라미터(report_id, query, category_code 등) 정의
+class AgentRunRequest(BaseModel):
+    """에이전트 액션 실행 POST /api/v1/agent/run 요청 본문 스키마"""
+
+    action: str = Field(..., min_length=1)
+    report_id: int | None = None
+    query: str | None = None
+    category_code: str | None = None
+    keyword_limit: int = Field(default=20, ge=1, le=100)
+    semantic_limit: int = Field(default=20, ge=1, le=100)
+    top_k: int = Field(default=5, ge=1, le=50)
+
+
 # 하이브리드 유사도 검색 엔드포인트
 # - POST /api/v1/search/similar 요청을 받아 AgentService.search_similar_reports 호출
 @router.post("/search/similar")
@@ -94,6 +108,70 @@ def query_agent(
     )
 
 
+# 에이전트 액션 실행 엔드포인트
+# - POST /api/v1/agent/run 요청의 action 값에 따라 보고서 조회/검색/질의 실행
+@router.post("/agent/run")
+def run_agent(
+    payload: AgentRunRequest, db: Session = Depends(get_db_session)
+) -> dict[str, Any]:
+    """action 파라미터에 따라 보고서 조회, 유사도 검색 또는 질의 응답을 실행하는 엔드포인트"""
+    # 서비스 인스턴스 생성 및 action 정규화
+    service = AgentService(db=db)
+    action_name = payload.action.strip().lower()
+
+    # 보고서 단건 조회 액션 처리
+    if action_name in ("get_report", "get_report_by_id", "report"):
+        if payload.report_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="get_report 액션에는 report_id가 필요합니다.",
+            )
+        report = service.get_report_by_id(report_id=payload.report_id)
+        if report is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"보고서(id={payload.report_id})를 찾을 수 없습니다.",
+            )
+        return {
+            "action": payload.action,
+            "report_id": payload.report_id,
+            "report": report,
+        }
+
+    # 유사도 검색 액션 처리
+    if action_name in ("search_similar", "search"):
+        if not payload.query or not payload.query.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="search_similar 액션에는 query가 필요합니다.",
+            )
+        return service.search_similar_reports(
+            query=payload.query,
+            category_code=payload.category_code,
+            keyword_limit=payload.keyword_limit,
+            semantic_limit=payload.semantic_limit,
+        )
+
+    # 에이전트 질의 액션 처리
+    if action_name in ("query", "answer_query"):
+        if not payload.query or not payload.query.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="query 액션에는 query가 필요합니다.",
+            )
+        return service.answer_report_query(
+            query=payload.query,
+            category_code=payload.category_code,
+            top_k=payload.top_k,
+        )
+
+    # 지원하지 않는 action 입력 시 400/422 예외 반환
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"지원하지 않는 action입니다: {payload.action}",
+    )
+
+
 # 단일 보고서 조회 엔드포인트
 # - GET /api/v1/agent/reports/{report_id} 요청 처리 및 미존재 시 404 반환
 @router.get("/agent/reports/{report_id}")
@@ -113,6 +191,6 @@ def get_agent_report(
 
 
 """
-/api/v1/search/similar, /api/v1/agent/query 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
-Pydantic 요청 스키마 검증과 DB 세션 의존성 주입을 통해 AgentService 로직과 연결하였다.
+/api/v1/search/similar, /api/v1/agent/query, /api/v1/agent/run 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
+action 기반 통합 실행(/agent/run)을 추가해 get_report 등의 요청을 AgentService와 연결하였다.
 """
