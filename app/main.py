@@ -13,11 +13,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # API 라우터, 설정, DB 상태 점검 및 커스텀 예외 클래스 import
+# - agent_router : 유사도 검색 및 에이전트 질의 API 라우터
 # - reports_router : 보고서 도메인 API 라우터
 # - settings : 앱 이름, 버전, 난이도 레벨 설정 조회
 # - check_db_and_vector_status : DB 및 pgvector 확장 연결 점검
 # - LLMClientError : LLM 클라이언트 호출/파싱 예외
 # - ServiceError : 도메인 서비스 비즈니스 예외
+from app.api.agent import router as agent_router
 from app.api.reports import router as reports_router
 from app.core.config import settings
 from app.db.session import check_db_and_vector_status
@@ -81,8 +83,9 @@ def create_app() -> FastAPI:
             "db": db_status,
         }
 
-    # 보고서 도메인 라우터 등록
+    # 보고서 및 에이전트/검색 도메인 라우터 등록
     app.include_router(reports_router)
+    app.include_router(agent_router)
 
     return app
 
@@ -97,6 +100,6 @@ if __name__ == "__main__":
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=settings.debug)
 
 """
-FastAPI 앱 팩토리, 헬스체크(/health), 보고서 라우터 및 ServiceError/LLMClientError 전역 예외 핸들러를 구성하였다.
+FastAPI 앱 팩토리, 헬스체크(/health), 보고서 및 에이전트/검색 라우터와 ServiceError/LLMClientError 전역 예외 핸들러를 구성하였다.
 도메인 예외를 일관된 JSON 응답으로 직렬화해 API 계약 준수성을 높였다.
 """
