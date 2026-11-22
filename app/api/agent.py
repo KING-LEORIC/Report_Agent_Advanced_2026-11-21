@@ -82,7 +82,7 @@ class AgentQueryRequest(BaseModel):
 
 
 # 에이전트 통합 실행 요청 스키마 클래스
-# - action 및 액션별 선택 파라미터(report_id, query, category_code 등) 정의
+# - action 및 액션별 선택 파라미터(report_id, query, category_code, style, max_sentences 등) 정의
 class AgentRunRequest(BaseModel):
     """에이전트 액션 실행 POST /api/v1/agent/run 요청 본문 스키마"""
 
@@ -93,6 +93,8 @@ class AgentRunRequest(BaseModel):
     keyword_limit: int = Field(default=20, ge=1, le=100)
     semantic_limit: int = Field(default=20, ge=1, le=100)
     top_k: int = Field(default=5, ge=1, le=50)
+    style: str = Field(default="brief")
+    max_sentences: int = Field(default=3, ge=1, le=10)
 
 
 # 하이브리드 유사도 검색 엔드포인트
@@ -127,12 +129,12 @@ def query_agent(
 
 
 # 에이전트 액션 실행 엔드포인트
-# - POST /api/v1/agent/run 요청의 action 값에 따라 보고서 조회/검색/질의 실행
+# - POST /api/v1/agent/run 요청의 action 값에 따라 보고서 조회/검색/질의/요약 실행
 @router.post("/agent/run")
 def run_agent(
     payload: AgentRunRequest, db: Session = Depends(get_db_session)
 ) -> dict[str, Any]:
-    """action 파라미터에 따라 보고서 조회, 유사도 검색 또는 질의 응답을 실행하는 엔드포인트"""
+    """action 파라미터에 따라 보고서 조회, 유사도 검색, 질의 응답 또는 요약을 실행하는 엔드포인트"""
     # 서비스 인스턴스 생성 및 action 정규화
     service = AgentService(db=db)
     action_name = payload.action.strip().lower()
@@ -154,6 +156,7 @@ def run_agent(
             "action": payload.action,
             "report_id": payload.report_id,
             "report": report,
+            "tool_calls": ["get_report"],
         }
 
     # 유사도·의미 검색 액션 처리 (find_report / search_similar / search)
@@ -163,12 +166,14 @@ def run_agent(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"{payload.action} 액션에는 query가 필요합니다.",
             )
-        return service.search_similar_reports(
+        result = service.search_similar_reports(
             query=payload.query,
             category_code=payload.category_code,
             keyword_limit=payload.keyword_limit,
             semantic_limit=payload.semantic_limit,
         )
+        result["tool_calls"] = ["find_report"]
+        return result
 
     # 에이전트 질의 액션 처리
     if action_name in ("query", "answer_query"):
@@ -177,11 +182,43 @@ def run_agent(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="query 액션에는 query가 필요합니다.",
             )
-        return service.answer_report_query(
+        result = service.answer_report_query(
             query=payload.query,
             category_code=payload.category_code,
             top_k=payload.top_k,
         )
+        result["tool_calls"] = ["query"]
+        return result
+
+    # 보고서 요약 액션 처리 (summarize_report)
+    if action_name in ("summarize_report", "summarize"):
+        if payload.report_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="summarize_report 액션에는 report_id가 필요합니다.",
+            )
+        from app.services import report_service
+        from app.services.report_service import ServiceError
+
+        try:
+            summary_res = report_service.summarize_report(
+                db=db,
+                report_id=payload.report_id,
+                style=payload.style,
+                max_sentences=payload.max_sentences,
+            )
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.message) from exc
+
+        return {
+            "action": payload.action,
+            "report_id": payload.report_id,
+            "status": summary_res.status,
+            "summary": summary_res.summary,
+            "model": summary_res.model,
+            "source_revision": summary_res.source_revision,
+            "tool_calls": ["summarize_report"],
+        }
 
     # 지원하지 않는 action 입력 시 400 예외 반환
     raise HTTPException(
@@ -225,5 +262,5 @@ def get_agent_report(
 
 """
 /api/v1/search/similar, /api/v1/agent/query, /api/v1/agent/run, /api/v1/agent/runs 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
-공백만 입력된 query에 대한 유효성 검증기를 추가해 필수 검색어 누락 시 422 응답이 반환되도록 구성하였다.
+summarize_report 액션을 추가하고 응답에 tool_calls를 포함해 에이전트 요약 요청과 검증 계약에 맞췄다.
 """
