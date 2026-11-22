@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 
 # 보고서 도메인 서비스 클래스
-# - 단일 보고서 조회, 키워드+의미 하이브리드 검색 및 에이전트 질의 응답 조합
+# - 단일 보고서 조회, 키워드+의미 하이브리드 검색, 에이전트 질의 응답 및 실행 이력 조회 조합
 class AgentService:
     """보고서 조회, 하이브리드 검색 및 에이전트 질의 처리를 담당하는 서비스 클래스"""
 
@@ -349,8 +349,87 @@ class AgentService:
             "sources": sources,
         }
 
+    # 에이전트 실행 이력 목록 조회 메서드
+    # - DB에 agent_runs 테이블이 있으면 조회하고, 없으면 빈 목록/페이지네이션 형태로 안전 반환
+    def list_agent_runs(
+        self, limit: int = 20, offset: int = 0, run_status: str | None = None
+    ) -> dict[str, Any]:
+        """에이전트 실행 이력 목록과 전체 건수를 조회해 반환하는 메서드"""
+        # DB에 agent_runs 테이블 존재 여부 확인
+        exists_row = (
+            self.db.execute(
+                text(
+                    """
+                    SELECT to_regclass('public.agent_runs') AS table_name
+                    """
+                )
+            )
+            .mappings()
+            .first()
+        )
+        has_table = bool(exists_row and exists_row["table_name"])
+
+        if not has_table:
+            return {
+                "items": [],
+                "runs": [],
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "status": run_status,
+            }
+
+        # agent_runs 테이블이 존재할 경우 status 필터 및 페이지네이션 조회
+        normalized_status = run_status.strip() if run_status else None
+        rows = (
+            self.db.execute(
+                text(
+                    """
+                    SELECT *
+                    FROM agent_runs
+                    WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
+                    ORDER BY 1 DESC
+                    LIMIT CAST(:limit AS integer)
+                    OFFSET CAST(:offset AS integer)
+                    """
+                ),
+                {"status": normalized_status, "limit": limit, "offset": offset},
+            )
+            .mappings()
+            .all()
+        )
+        total_row = (
+            self.db.execute(
+                text(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM agent_runs
+                    WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
+                    """
+                ),
+                {"status": normalized_status},
+            )
+            .mappings()
+            .first()
+        )
+        items = [dict(r) for r in rows]
+        total = (
+            int(total_row["cnt"])
+            if total_row and total_row["cnt"] is not None
+            else len(items)
+        )
+
+        return {
+            "items": items,
+            "runs": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "status": run_status,
+        }
+
 
 """
 PostgreSQL 파라미터 타입 추론 모호성(AmbiguousParameter)을 해소하기 위해 바인딩 파라미터에 CAST를 명시하였다.
-ORM 모델(app/models/report.py) 구조에 맞춰 reports, report_categories 및 6종 상세 테이블을 조인하도록 반영하였다.
+ORM 모델(app/models/report.py) 구조에 맞춰 reports, report_categories 및 6종 상세 테이블을 조인하고 실행 이력 조회를 추가하였다.
 """
