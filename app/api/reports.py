@@ -156,7 +156,11 @@ def get_prompt_versions(
     return report_service.get_prompt_versions(db=db, report_id=report_id)
 
 
-# API-12: 프롬프트 활성 버전 전환 엔드포인트
+# API-12: 프롬프트 활성 버전 전환 엔드포인트 (/prompts/{report_id}/active-version 및 /reports/{report_id}/prompt-versions/active 지원)
+@router.put(
+    "/api/v1/prompts/{report_id}/active-version",
+    response_model=PromptActiveVersionResponse,
+)
 @router.post(
     "/api/v1/reports/{report_id}/prompt-versions/active",
     response_model=PromptActiveVersionResponse,
@@ -183,5 +187,5 @@ def reindex_report(
 
 """
 카테고리 조회, 보고서 CRUD, 요약 생성, 프롬프트 버전 관리 및 임베딩 재색인 REST API 라우터를 구현하였다.
-/api/v1/prompts/{report_id}/versions 경로에 GET 버전 이력 조회 라우트를 추가해 405 오류를 해소하였다.
+PUT /api/v1/prompts/{report_id}/active-version 경로를 추가해 프롬프트 활성 버전 전환 요청을 처리할 수 있도록 구성하였다.
 """
