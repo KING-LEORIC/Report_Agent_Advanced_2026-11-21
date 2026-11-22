@@ -138,12 +138,12 @@ def run_agent(
             "report": report,
         }
 
-    # 유사도 검색 액션 처리
-    if action_name in ("search_similar", "search"):
+    # 유사도·의미 검색 액션 처리 (find_report / search_similar / search)
+    if action_name in ("find_report", "search_similar", "search"):
         if not payload.query or not payload.query.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="search_similar 액션에는 query가 필요합니다.",
+                detail=f"{payload.action} 액션에는 query가 필요합니다.",
             )
         return service.search_similar_reports(
             query=payload.query,
@@ -165,7 +165,7 @@ def run_agent(
             top_k=payload.top_k,
         )
 
-    # 지원하지 않는 action 입력 시 400/422 예외 반환
+    # 지원하지 않는 action 입력 시 400 예외 반환
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"지원하지 않는 action입니다: {payload.action}",
@@ -192,5 +192,5 @@ def get_agent_report(
 
 """
 /api/v1/search/similar, /api/v1/agent/query, /api/v1/agent/run 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
-action 기반 통합 실행(/agent/run)을 추가해 get_report 등의 요청을 AgentService와 연결하였다.
+/agent/run에서 find_report 액션을 지원하도록 분기를 추가해 보고서 검색 요청을 처리할 수 있게 구성하였다.
 """
