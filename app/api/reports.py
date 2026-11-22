@@ -2,10 +2,9 @@
 
 # FastAPI 라우터, 쿼리/경로 파라미터 및 HTTP 상태 코드 import
 # - APIRouter : 보고서 도메인 엔드포인트 그룹핑
-# - Depends : DB 세션 의존성 주입
-# - Query : 목록/요약/재색인 쿼리 파라미터 검증
-# - status : 201 Created, 204 No Content 등 상태 코드 상수
-from fastapi import APIRouter, Depends, Query, status
+# - Body, Depends, HTTPException, Query, status : 요청 바디, DB 세션, 예외 및 상태 코드 상수
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 # DB 세션 팩토리 및 보고서 서비스 계층 import
@@ -29,10 +28,20 @@ from app.schemas.report import (
     SummarizeResponse,
 )
 from app.services import report_service
+from app.services.report_service import ServiceError
 
 # 보고서 도메인 APIRouter 인스턴스 생성
 # - /api/v1 접두사는 상위 main.py 또는 라우터 등록 시 부여
 router = APIRouter(tags=["reports"])
+
+
+# 보고서 요약 요청 바디 스키마 클래스
+# - JSON 바디로 전달되는 style, max_sentences 옵션 정의
+class SummarizeRequestBody(BaseModel):
+    """보고서 요약 POST 요청 본문 스키마"""
+
+    style: str | None = Field(default=None)
+    max_sentences: int | None = Field(default=None, ge=1, le=10)
 
 
 # API-01: 전체 보고서 카테고리 조회 엔드포인트
@@ -110,13 +119,28 @@ def summarize_report(
     report_id: int,
     style: str = Query(default="brief"),
     max_sentences: int = Query(default=3, ge=1, le=10),
+    body: SummarizeRequestBody | None = Body(default=None),
     db: Session = Depends(get_db),
 ) -> SummarizeResponse:
     """지정 보고서의 brief 또는 structured 요약을 생성하는 엔드포인트"""
-    # 요약 생성 서비스 호출
-    return report_service.summarize_report(
-        db=db, report_id=report_id, style=style, max_sentences=max_sentences
+    # 요청 바디 값이 있으면 우선 반영, 없으면 쿼리 파라미터 기본값 사용
+    resolved_style = (
+        body.style if (body is not None and body.style is not None) else style
     )
+    resolved_max_sentences = (
+        body.max_sentences
+        if (body is not None and body.max_sentences is not None)
+        else max_sentences
+    )
+    try:
+        return report_service.summarize_report(
+            db=db,
+            report_id=report_id,
+            style=resolved_style,
+            max_sentences=resolved_max_sentences,
+        )
+    except ServiceError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from exc
 
 
 # API-10: 프롬프트 새 버전 추가 엔드포인트 (/prompts/{report_id}/versions 및 /reports/{report_id}/prompt-versions 지원)
@@ -187,5 +211,5 @@ def reindex_report(
 
 """
 카테고리 조회, 보고서 CRUD, 요약 생성, 프롬프트 버전 관리 및 임베딩 재색인 REST API 라우터를 구현하였다.
-PUT /api/v1/prompts/{report_id}/active-version 경로를 추가해 프롬프트 활성 버전 전환 요청을 처리할 수 있도록 구성하였다.
+/summarize 요청 바디(style, max_sentences)를 수용하고 ServiceError를 HTTP 예외로 변환하도록 구성하였다.
 """
