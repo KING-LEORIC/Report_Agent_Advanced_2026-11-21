@@ -119,7 +119,12 @@ def summarize_report(
     )
 
 
-# API-10: 프롬프트 새 버전 추가 엔드포인트
+# API-10: 프롬프트 새 버전 추가 엔드포인트 (/prompts/{report_id}/versions 및 /reports/{report_id}/prompt-versions 지원)
+@router.post(
+    "/api/v1/prompts/{report_id}/versions",
+    response_model=PromptVersionCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 @router.post(
     "/api/v1/reports/{report_id}/prompt-versions",
     response_model=PromptVersionCreateResponse,
@@ -175,5 +180,5 @@ def reindex_report(
 
 """
 카테고리 조회, 보고서 CRUD, 요약 생성, 프롬프트 버전 관리 및 임베딩 재색인 REST API 라우터를 구현하였다.
-세션 주입과 요청/응답 스키마 검증을 라우터 계층에서 일관되게 처리하도록 구성하였다.
+/api/v1/prompts/{report_id}/versions 경로를 추가해 프롬프트 새 버전 생성 요청을 처리할 수 있도록 구성하였다.
 """
