@@ -15,7 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.services import report_service
 from app.services.agent_service import AgentService
+from app.services.report_service import ServiceError
 
 # 에이전트 및 검색 엔드포인트용 라우터 인스턴스 생성
 router = APIRouter(prefix="/api/v1", tags=["Agent & Search"])
@@ -190,6 +192,59 @@ def run_agent(
         result["tool_calls"] = ["query"]
         return result
 
+    # 검색 후 요약 액션 처리 (search_and_summarize)
+    if action_name == "search_and_summarize":
+        if not payload.query or not payload.query.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="search_and_summarize 액션에는 query가 필요합니다.",
+            )
+        search_res = service.search_similar_reports(
+            query=payload.query,
+            category_code=payload.category_code,
+            keyword_limit=payload.keyword_limit,
+            semantic_limit=payload.semantic_limit,
+        )
+        matched_items = search_res.get("results") or []
+        top_items = matched_items[: payload.top_k]
+
+        if top_items:
+            target_report_id = int(top_items[0]["report_id"])
+            try:
+                summary_res = report_service.summarize_report(
+                    db=db,
+                    report_id=target_report_id,
+                    style=payload.style,
+                    max_sentences=payload.max_sentences,
+                )
+            except ServiceError as exc:
+                raise HTTPException(status_code=exc.status, detail=exc.message) from exc
+
+            return {
+                "action": payload.action,
+                "query": payload.query,
+                "report_id": target_report_id,
+                "status": summary_res.status,
+                "summary": summary_res.summary,
+                "model": summary_res.model,
+                "source_revision": summary_res.source_revision,
+                "results": top_items,
+                "tool_calls": [
+                    "find_report",
+                    "summarize_report",
+                    "search_and_summarize",
+                ],
+            }
+
+        return {
+            "action": payload.action,
+            "query": payload.query,
+            "status": "completed",
+            "summary": f"'{payload.query}'와(과) 관련된 보고서를 찾지 못해 요약을 생성하지 못했습니다.",
+            "results": [],
+            "tool_calls": ["find_report", "search_and_summarize"],
+        }
+
     # 보고서 요약 액션 처리 (summarize_report)
     if action_name in ("summarize_report", "summarize"):
         if payload.report_id is None:
@@ -197,9 +252,6 @@ def run_agent(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="summarize_report 액션에는 report_id가 필요합니다.",
             )
-        from app.services import report_service
-        from app.services.report_service import ServiceError
-
         try:
             summary_res = report_service.summarize_report(
                 db=db,
@@ -262,5 +314,5 @@ def get_agent_report(
 
 """
 /api/v1/search/similar, /api/v1/agent/query, /api/v1/agent/run, /api/v1/agent/runs 및 /api/v1/agent/reports/{report_id} 엔드포인트를 제공하는 라우터를 구현하였다.
-summarize_report 액션을 추가하고 응답에 tool_calls를 포함해 에이전트 요약 요청과 검증 계약에 맞췄다.
+search_and_summarize 액션을 추가해 검색 결과 기반 LLM 요약을 수행하고 tool_calls에 반영하도록 구성하였다.
 """
